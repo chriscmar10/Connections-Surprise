@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>The Surprise — Connections</title>
+<style>
+:root{--bg:#f7f5ef;--ink:#171717;--tile:#fff;--muted:#686868;--accent:#5d2f8f;--good:#2f7d4a;--bad:#b43b3b}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,Helvetica,sans-serif}
+.wrap{max-width:720px;margin:auto;padding:28px 16px 50px}.top{text-align:center}
+h1{font-family:Georgia,serif;font-size:38px;margin:8px 0}.sub{color:var(--muted);line-height:1.5;margin:0 auto 22px;max-width:600px}
+.status{min-height:30px;font-weight:700;text-align:center;margin:12px 0}.lives{font-size:14px;color:var(--muted);text-align:center;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.tile{border:0;border-radius:9px;background:var(--tile);min-height:78px;padding:8px 4px;font-weight:800;font-size:14px;letter-spacing:.3px;box-shadow:0 2px 7px #00000012;cursor:pointer}.tile.selected{background:#d9d0e7;outline:3px solid var(--accent)}.tile:disabled{cursor:default}.tile.solved{opacity:.35}
+.controls{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:18px 0}.btn{border:1px solid #aaa;background:white;border-radius:999px;padding:11px 17px;font-weight:700;cursor:pointer}.btn.primary{background:#171717;color:#fff;border-color:#171717}
+.solved{margin-top:18px}.group{border-radius:12px;padding:13px 15px;margin:9px 0;background:#fff}.group b{display:block;font-size:14px}.group span{font-size:13px;color:#555}
+.reveal{display:none;text-align:center;margin-top:25px;padding:30px 18px;border-radius:18px;background:#fff;box-shadow:0 5px 24px #00000018}.reveal h2{font-family:Georgia,serif;font-size:34px;margin:0 0 14px}.reveal .big{font-size:26px;font-weight:900;line-height:1.2}.reveal p{color:#555;line-height:1.6}
+.hint{font-size:13px;color:var(--muted);text-align:center;min-height:20px;margin-top:8px}
+.dot{position:fixed;bottom:7px;left:50%;width:7px;height:7px;border-radius:50%;background:#aaa;opacity:.18;transform:translateX(-50%);cursor:pointer}
+.modal{display:none;position:fixed;inset:0;background:#0008;align-items:center;justify-content:center;padding:18px}.card{background:#fff;border-radius:16px;padding:22px;max-width:520px;width:100%}.card h3{margin-top:0}.card input,.card textarea{width:100%;padding:10px;margin:5px 0 10px;border:1px solid #bbb;border-radius:8px}.small{font-size:12px;color:#666}
+@media(max-width:500px){h1{font-size:32px}.tile{min-height:72px;font-size:12px}.wrap{padding-top:18px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>Connections</h1>
+    <p class="sub">Find the four groups of four. Select exactly four clues, then submit your guess. Solve all four groups to reveal your surprise.</p>
+  </div>
+  <div class="lives" id="lives"></div>
+  <div class="status" id="status"></div>
+  <div class="grid" id="grid"></div>
+  <div class="controls">
+    <button class="btn primary" id="submit">Submit</button>
+    <button class="btn" id="shuffle">Shuffle</button>
+    <button class="btn" id="clear">Clear</button>
+    <button class="btn" id="hint">Hint</button>
+  </div>
+  <div class="hint" id="hintText"></div>
+  <div class="solved" id="solved"></div>
+  <div class="reveal" id="reveal">
+    <h2>The Surprise!</h2>
+    <div class="big">YOU'RE FLYING FIRST CLASS! ✈️🥂</div>
+    <p>You already knew about the trip. Now you know how you're getting there. Sit back, relax, and enjoy the journey!</p>
+  </div>
+</div>
+
+<div class="dot" id="dot" aria-label="Creator access"></div>
+<div class="modal" id="modal">
+  <div class="card">
+    <h3>Creator Mode</h3>
+    <p class="small">Enter the PIN to edit the puzzle. This is a convenience lock, not security.</p>
+    <input id="pin" type="password" inputmode="numeric" placeholder="PIN">
+    <button class="btn primary" id="unlock">Unlock</button>
+    <div id="editor" style="display:none;margin-top:18px">
+      <p class="small">Each line is a category in the format: Category | clue, clue, clue, clue</p>
+      <textarea id="data" rows="9"></textarea>
+      <button class="btn primary" id="save">Save Puzzle</button>
+      <button class="btn" id="close">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const defaultGroups = [
+  {name:"___ CLASS", words:["SCIENCE","MASTER","BUSINESS","UPPER"]},
+  {name:"Greek Connections", words:["ZEUS","ACROPOLIS","MYTH","PARTHENON"]},
+  {name:"Italy Connections", words:["GONDOLA","DUOMO","DAVID","TREVI"]},
+  {name:"Cruise Connections", words:["DECK","CREW","AFT","PORT"]}
+];
+
+let groups = loadGroups();
+let clues = [];
+let selected = new Set();
+let solved = new Set();
+let mistakes = 0;
+const maxMistakes = 4;
+
+function loadGroups(){
+  try { return JSON.parse(localStorage.getItem("finalSurpriseGroups")) || defaultGroups; }
+  catch(e){ return defaultGroups; }
+}
+function saveGroups(){ localStorage.setItem("finalSurpriseGroups", JSON.stringify(groups)); }
+
+function rebuild(){
+  clues = groups.flatMap((g,gi)=>g.words.map(w=>({word:w,gi})));
+  shuffleArray(clues);
+  selected.clear(); solved.clear(); mistakes=0;
+  render();
+  document.getElementById("reveal").style.display="none";
+  document.getElementById("status").textContent="";
+  document.getElementById("hintText").textContent="";
+}
+function render(){
+  const grid=document.getElementById("grid"); grid.innerHTML="";
+  clues.forEach((c,i)=>{
+    const b=document.createElement("button");
+    b.className="tile"+(selected.has(i)?" selected":"")+(solved.has(c.gi)?" solved":"");
+    b.textContent=c.word;
+    b.disabled=solved.has(c.gi) || mistakes>=maxMistakes;
+    b.onclick=()=>toggle(i);
+    grid.appendChild(b);
+  });
+  document.getElementById("lives").textContent=`Mistakes: ${mistakes} / ${maxMistakes}`;
+  renderSolved();
+}
+function toggle(i){
+  if(selected.has(i)) selected.delete(i);
+  else if(selected.size<4) selected.add(i);
+  render();
+}
+function submit(){
+  if(solved.size===groups.length) return;
+  if(selected.size!==4){setStatus("Select exactly 4 clues.","bad");return;}
+  const counts=groups.map((g,gi)=>[gi,[...selected].filter(i=>clues[i].gi===gi).length]);
+  const best=Math.max(...counts.map(x=>x[1]));
+  const match=counts.find(x=>x[1]===4);
+  if(match){
+    solved.add(match[0]);
+    selected.clear();
+    setStatus("Correct! Group solved.","good");
+    if(solved.size===groups.length){
+      document.getElementById("reveal").style.display="block";
+      document.getElementById("reveal").scrollIntoView({behavior:"smooth",block:"center"});
+    }
+  }else{
+    mistakes++;
+    selected.clear();
+    const plural=best===1?"is":"are";
+    setStatus(`Incorrect — ${best} of 4 ${plural} right.`,"bad");
+    if(mistakes>=maxMistakes) setStatus(`Game over — ${best} of 4 were right. You can reshuffle and try again.`,"bad");
+  }
+  render();
+}
+function setStatus(t,kind){
+  const el=document.getElementById("status"); el.textContent=t;
+  el.style.color=kind==="good"?"var(--good)":kind==="bad"?"var(--bad)":"var(--ink)";
+}
+function renderSolved(){
+  const box=document.getElementById("solved"); box.innerHTML="";
+  groups.forEach((g,gi)=>{
+    if(!solved.has(gi)) return;
+    const d=document.createElement("div"); d.className="group";
+    d.innerHTML=`<b>${escapeHtml(g.name)}</b><span>${g.words.join(" • ")}</span>`;
+    box.appendChild(d);
+  });
+}
+function shuffleArray(a){
+  for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
+}
+function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));}
+
+document.getElementById("submit").onclick=submit;
+document.getElementById("shuffle").onclick=()=>{shuffleArray(clues);selected.clear();render();};
+document.getElementById("clear").onclick=()=>{selected.clear();render();};
+document.getElementById("hint").onclick=()=>{
+  const unsolved=groups.map((g,i)=>i).filter(i=>!solved.has(i));
+  if(!unsolved.length)return;
+  const g=groups[unsolved[0]];
+  document.getElementById("hintText").textContent=`Hint: Think about what these four clues have in common: ${g.words.join(", ")}.`;
+};
+
+let taps=0,timer;
+document.getElementById("dot").onclick=()=>{
+  taps++; clearTimeout(timer); timer=setTimeout(()=>taps=0,1800);
+  if(taps>=7){taps=0;document.getElementById("modal").style.display="flex";document.getElementById("pin").focus();}
+};
+document.getElementById("unlock").onclick=()=>{
+  if(document.getElementById("pin").value==="2468"){
+    document.getElementById("editor").style.display="block";
+    document.getElementById("data").value=groups.map(g=>`${g.name} | ${g.words.join(", ")}`).join("\n");
+  }else alert("Incorrect PIN.");
+};
+document.getElementById("save").onclick=()=>{
+  const lines=document.getElementById("data").value.split("\n").map(x=>x.trim()).filter(Boolean);
+  const next=[];
+  for(const line of lines){
+    const parts=line.split("|");
+    if(parts.length!==2) continue;
+    const name=parts[0].trim(), words=parts[1].split(",").map(x=>x.trim().toUpperCase()).filter(Boolean);
+    if(name && words.length===4) next.push({name,words});
+  }
+  if(next.length===4){groups=next;saveGroups();rebuild();document.getElementById("modal").style.display="none";document.getElementById("pin").value="";alert("Puzzle saved.");}
+  else alert("Please enter exactly 4 categories with 4 clues each.");
+};
+document.getElementById("close").onclick=()=>document.getElementById("modal").style.display="none";
+
+rebuild();
+</script>
+</body>
+</html>
